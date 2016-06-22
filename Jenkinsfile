@@ -73,7 +73,6 @@ docker.image('cloudbees/java-build-tools:0.0.7.1').inside {
             // Wait for OpenShift deployment
             timeout(time: 5, unit: 'MINUTES') {
                 waitUntil {
-                    sleep 5L //poll only every 5 seconds
                     sh "oc deploy frontend > .openshift-build-status"
                     // parse `describe-environment-health` output
                     def openshiftDeployStatus = readFile(".openshift-build-status")
@@ -90,7 +89,6 @@ docker.image('cloudbees/java-build-tools:0.0.7.1').inside {
 }
 
 stage name: 'Test with Selenium', concurrency: 1
-
 node {
     unstash 'acceptance-tests'
 
@@ -112,5 +110,63 @@ node {
                 """
             }
         }
+    }
+}
+
+stage name:'Deploy to OpenShift', concurrency: 1
+mail \
+    to: 'alobato@cloudbees.com',
+    subject: "Deploy version #${env.BUILD_NUMBER} on http://game-of-life-staging.openshift.beesshoop.org/ ?",
+    body: """\
+       Deploy game-of-life#${env.BUILD_NUMBER} and start web browser tests on http://game-of-life-staging.openshift.beesshoop.org/ ?
+       Approve/reject on ${env.BUILD_URL}.
+       """
+
+input "Deploy on http://game-of-life-qa.openshift.beesshop.org/ and run Selenium tests?"
+checkpoint 'Deploy to Staging'
+
+docker.image('cloudbees/java-build-tools:0.0.7.1').inside {
+    //Requires CloudBees OpenShift CLI Plugin to
+    //automatically install OC client and log in to the server
+    wrap([$class: 'OpenShiftBuildWrapper', 
+            url: 'https://openshift.beesshop.org:8443',
+            credentialsId: 'openshift-admin-aws',
+            insecure: true, //Don't check server certificate
+            ]) {
+
+            // oc change to source project
+            // tag image to promote to staging
+            // change to the target project
+            sh """
+            oc project game-of-life
+            oc tag wildfly-j2ee-application:latest wildfly-j2ee-application:staging
+            oc project game-of-life-staging
+            """
+
+            //with build triggers disabled request a deploy with the latest build
+            //sh "oc deploy frontend --latest > .openshift-deploy-number"
+
+            //with build triggers enabled get the current deploy number
+            sh "oc deploy frontend > .openshift-deploy-number"
+            
+            def deployMessage = readFile(".openshift-deploy-number")
+            def deployNumber = deployMessage.substring(deployMessage.indexOf('#')).tokenize()[0]
+            echo "$deployMessage"
+
+            // Wait for OpenShift deployment
+            timeout(time: 5, unit: 'MINUTES') {
+                waitUntil {
+                    sh "oc deploy frontend > .openshift-build-status"
+                    // parse `describe-environment-health` output
+                    def openshiftDeployStatus = readFile(".openshift-build-status")
+                    echo "Checking: '$deployNumber deployed'"
+                    def isDeployed = openshiftDeployStatus.indexOf("$deployNumber deployed")
+                    echo "$openshiftDeployStatus"
+                    echo "$isDeployed"
+                    return isDeployed>0
+                }
+            }
+
+
     }
 }
