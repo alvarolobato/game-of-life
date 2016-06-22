@@ -137,6 +137,7 @@ docker.image('cloudbees/java-build-tools:0.0.7.1').inside {
             // oc change to source project
             // tag image to promote to staging
             // change to the target project
+            //The target project must have a deployment config pointing to the image registry of game-of-life tag staging
             sh """
             oc project game-of-life
             oc tag wildfly-j2ee-application:latest wildfly-j2ee-application:staging
